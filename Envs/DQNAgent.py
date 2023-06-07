@@ -1,245 +1,164 @@
+"""Chinese babies' own DQNAgent("""
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-import pygame
-
-import abc
-import glob
-import os
-import sys
-from types import LambdaType
-from collections import deque
-from collections import namedtuple
-
-import random 
-import time
-import numpy as np
 import math
+import os
+import random
 
-import torch
-import torch.nn as nn
-from torch.autograd import Variable
-import torch.nn.functional as F
- 
-import torch.optim as optim
- 
-import torchvision.transforms as T
-from torch import FloatTensor, LongTensor, ByteTensor
-Tensor = FloatTensor
+from absl import logging
 
-from replay_memory import circular_replay_buffer.WrappedReplayBuffer
+from dopamine.discrete_domains import atari_lib
+from dopamine.replay_memory import circular_replay_buffer
+import gin.tf
+import numpy as np
+import tensorflow as tf
 
 
-IM_WIDTH = 80
-IM_HEIGHT = 60
-SHOW_PREVIEW = False
- 
-SECOND_PER_EPISODE = 10
-
-EPSILON = 0.9       # epsilon used for epsilon greedy approach
-GAMMA = 0.9
-TARGET_NETWORK_REPLACE_FREQ = 100       # How frequently target netowrk updates
-MEMORY_CAPACITY = 100
-BATCH_SIZE = 32
-LR = 0.01           # learning rate
-MODEL_NAME = "nnModule"
-
-def select_action(action_number):
-    if action_number == 0:
-        real_action = [1, -0.2]
-    elif action_number == 1:
-        real_action = [1, 0]
-    elif action_number == 2:
-        real_action = [1, 0.2]
-    elif action_number == 3:
-        real_action = [2, -0.2]
-    elif action_number == 4:
-        real_action = [2, 0]
-    elif action_number == 5:
-        real_action = [2, 0.2]
-    elif action_number == 6:
-        real_action = [3.0, -0.2]
-    elif action_number == 7:
-        real_action = [3.0, 0]
-    elif action_number == 8:
-        real_action = [3.0, 0.2]
-    return real_action
-
-class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
-        self.bn1 = nn.BatchNorm2d(16)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2)
-        self.bn2 = nn.BatchNorm2d(32)
-        self.conv3 = nn.Conv2d(32, 32, kernel_size=5, stride=2)
-        self.bn3 = nn.BatchNorm2d(32)
-        self.head = nn.Linear(26912,5)  #self.head = nn.Linear(896,5)
-    
-    def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))  # 一层卷积
-        x = F.relu(self.bn2(self.conv2(x)))  # 两层卷积
-        x = F.relu(self.bn3(self.conv3(x)))  # 三层卷积
-        return self.head(x.view(x.size(0),-1)) # 全连接层 
-        
-class DQN(object):
-    def __init__(self):
-        self.eval_net,self.target_net = Net(),Net()
-        
-        # Define counter, memory size and loss function
-        self.learn_step_counter = 0 # count the steps of learning process        
- 
-        self.memory = []
-        self.position = 0 # counter used for experience replay buff        
-        self.capacity = 200
-        
-        #------- Define the optimizer------#
-        self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=LR)
-        
-        # ------Define the loss function-----#
-        self.loss_func = nn.MSELoss()
-        
-    def  choose_action(self, x):
-        # This function is used to make decision based upon epsilon greedy
-        
-        x = torch.unsqueeze(torch.FloatTensor(x), 0) # add 1 dimension to input state x
-        x = x.permute(0,3,2,1)  #把图片维度从[batch, height, width, channel] 转为[batch, channel, height, width]
-        # input only one sample
-        if np.random.uniform() < EPSILON:   # greedy
-            # use epsilon-greedy approach to take action
-            actions_value = self.eval_net.forward(x)
-            #print(torch.max(actions_value, 1)) 
-            # torch.max() returns a tensor composed of max value along the axis=dim and corresponding index
-            # what we need is the index in this function, representing the action of cart.
-            action = torch.max(actions_value, 1)[1].data.numpy()
-            action = action[0]
-            
-        else: 
-            action = np.random.randint(0, 5)
-        
-        return action
- 
-    def push_memory(self, obs, a, r, obs_):
-        if len(self.memory) < self.capacity:
-            self.memory.append(None)
-        self.memory[self.position] = Transition(torch.unsqueeze(torch.FloatTensor(obs), 0),torch.unsqueeze(torch.FloatTensor(obs_), 0),\
-                                                torch.from_numpy(np.array([a])),torch.from_numpy(np.array([r],dtype='int64')))
-        self.position = (self.position + 1) % self.capacity
-	
-                
-    def get_sample(self,batch_size):
-        return random.sample(self.memory, batch_size)
-        
-    def learn(self):
-        # Define how the whole DQN works including sampling batch of experiences,
-        # when and how to update parameters of target network, and how to implement
-        # backward propagation.
-        
-        # update the target network every fixed steps
-        if self.learn_step_counter % TARGET_NETWORK_REPLACE_FREQ == 0:
-            # Assign the parameters of eval_net to target_net
-            self.target_net.load_state_dict(self.eval_net.state_dict())
-        self.learn_step_counter += 1
-        
-        transitions = self.get_sample(BATCH_SIZE)  # 抽样
-        print(transitions)
-        batch = Transition(*zip(*transitions))
- 
-        # extract vectors or matrices s,a,r,s_ from batch memory and convert these to torch Variables
-        # that are convenient to back propagation
-        b_s = Variable(torch.cat(batch.state))
-        # convert long int type to tensor
-        b_a = Variable(torch.cat(batch.action))
-        b_r = Variable(torch.cat(batch.reward))
-        b_s_ = Variable(torch.cat(batch.next_state))
-        
- 
-        #b_s和b_s_分别对应当前帧和下一帧的图像数据，变量的维度是80*60*3(x*y*rgb_channel)，但进入神经网络需将其维度变为3*80*60
-        b_s = b_s.permute(0,3,2,1)  
-        b_s_ = b_s_.permute(0,3,2,1)        
-        
-        # calculate the Q value of state-action pair
-        q_eval = self.eval_net(b_s).gather(1,b_a.unsqueeze(1)) # (batch_size, 1)
- 
-        # calculate the q value of next state
-        q_next = self.target_net(b_s_).detach() # detach from computational graph, don't back propagate
-        # select the maximum q value
-        # q_next.max(1) returns the max value along the axis=1 and its corresponding index
-        print(q_next)
-        print(q_next.max(1))
-        q_target = b_r + GAMMA * q_next.max(1)[0].view(BATCH_SIZE, 1) # (batch_size, 1)
-        print(q_target)
-        
-        #q_target shape:32 x 32,looks like that q_next.max didn't make sense.
-        loss = self.loss_func(q_eval, q_target)
-        
-        self.optimizer.zero_grad() # reset the gradient to zero
-        loss.backward()
-        self.optimizer.step() # execute back propagation for one step
-        
-Transition = namedtuple('Transition',('state', 'next_state','action', 'reward'))
+# These are aliases which are used by other classes.
+NATURE_DQN_OBSERVATION_SHAPE = (256,256)
+NATURE_DQN_DTYPE = tf.float32
+NATURE_DQN_STACK_SIZE = 4
+nature_dqn_network = atari_lib.NatureDQNNetwork
 
 
-def main():
-  # Set gym-carla environment
-  env = gym.make('carla-v0', params=params)
-  dqn = DQN()
-  dqn.eval_net.load_state_dict(torch.load('EvalNet.pt'))
-  dqn.eval_net.eval()
-  dqn.target_net.load_state_dict(torch.load('TargetNet.pt'))
-  dqn.target_net.eval()
-"""
-  # =============== push memory into buffer ================
-  count = 0
-  max_reward = float("-inf")
-  reward_list = []
-  for iteration in range(1,11):
-    print("# Iteration{} start!".format(iteration))
-    reward = 0
-    env.reset()
-    obs = env.reset()
-    for episode in range(100):      
-      a=dqn.choose_action(obs)
-      action = select_action(a)
-      print("# Episode{} start!".format(episode))
-      print("choose_action:", action)
-      obs_,r,done,info = env.step(action)
-      print(obs.shape[0])
-      dqn.push_memory(obs, a, r, obs_)
-      reward += r
-      obs=obs_
+@gin.configurable
+def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
+  """Returns the current epsilon for the agent's epsilon-greedy policy.
 
-      if  (dqn.position % (MEMORY_CAPACITY-1) )== 0: #or done:
-        #create_dataset(num_buffers=25, num_steps=100, game='carla', data_dir_prefix='data_dir_prefix', trajectories_per_buffer=)
-        dqn.learn()
-        count+=1
-        print('learned times:',count)
+  This follows the Nature DQN schedule of a linearly decaying epsilon (Mnih et
+  al., 2015). The schedule is as follows:
+    Begin at 1. until warmup_steps steps have been taken; then
+    Linearly decay epsilon from 1. to epsilon in decay_period steps; and then
+    Use epsilon from there on.
 
-      if done:
-        print("Done!")
-        break
-    print("# the reward of this iteration is", reward)
-    if reward > max_reward:
-      max_reward = reward
-      torch.save(dqn.eval_net.state_dict(),'EvalNet.pt')
-      torch.save(dqn.target_net.state_dict(),'TargetNet.pt')
-    reward_list.append(reward)
-    
-  return reward_list
-"""
-  for iteration in range(1,11):
-    print("# Iteration{} start!").format(iteration)
-    reward = 0
-    env.reset()
-    obs = env.reset()
-    for episode in range(100):
-      a = dqn.choose_action(obs)
-      action = select_action(a)
-      print("# Episode{} start!".format(episode))
-      print("choose_action:", action)
-      obs_,r,done,info = env.step(action)
-      dqn.push_memory(obs, a, r, obs_)
-    create_dataset(num_buffers=10, num_steps=100, game='carla', data_dir_prefix='data_pre_fix', 5)      
-if __name__ == '__main__':
-    r_list = main()
-    x = list(y for y in range(1,11))
-    plt.plot(x,r_list)
+  Args:
+    decay_period: float, the period over which epsilon is decayed.
+    step: int, the number of training steps completed so far.
+    warmup_steps: int, the number of steps taken before epsilon is decayed.
+    epsilon: float, the final value to which to decay the epsilon parameter.
+
+  Returns:
+    A float, the current epsilon value computed according to the schedule.
+  """
+  steps_left = decay_period + warmup_steps - step
+  bonus = (1.0 - epsilon) * steps_left / decay_period
+  bonus = np.clip(bonus, 0., 1. - epsilon)
+  return epsilon + bonus
+
+
+@gin.configurable
+def identity_epsilon(unused_decay_period, unused_step, unused_warmup_steps,
+                     epsilon):
+  return epsilon
+
+
+@gin.configurable
+class DQNAgent(object):
+  """An implementation of the DQN agent."""
+
+  def __init__(self,
+               sess,
+               num_actions,
+               observation_shape=atari_lib.NATURE_DQN_OBSERVATION_SHAPE,
+               observation_dtype=atari_lib.NATURE_DQN_DTYPE,
+               stack_size=atari_lib.NATURE_DQN_STACK_SIZE,
+               network=atari_lib.NatureDQNNetwork,
+               gamma=0.99,
+               update_horizon=1,
+               min_replay_history=20000,
+               update_period=4,
+               target_update_period=8000,
+               epsilon_fn=linearly_decaying_epsilon,
+               epsilon_train=0.01,
+               epsilon_eval=0.001,
+               epsilon_decay_period=250000,
+               tf_device='/cpu:*',
+               eval_mode=False,
+               use_staging=False,
+               max_tf_checkpoints_to_keep=4,
+               optimizer=tf.compat.v1.train.RMSPropOptimizer(
+                   learning_rate=0.00025,
+                   decay=0.95,
+                   momentum=0.0,
+                   epsilon=0.00001,
+                   centered=True),
+               summary_writer=None,
+               summary_writing_frequency=500,
+               allow_partial_reload=False):
+    """Initializes the agent and constructs the components of its graph."""
+    assert isinstance(observation_shape, tuple) 
+	# assert语句是一种插入调试断点到程序的一种便捷的方式。
+	# 判断一个变量是否是某个类型可以用isinstance()判断
+    logging.info('Creating %s agent with the following parameters:',
+                 self.__class__.__name__)
+    logging.info('\t gamma: %f', gamma)
+    logging.info('\t update_horizon: %f', update_horizon)
+    logging.info('\t min_replay_history: %d', min_replay_history)
+    logging.info('\t update_period: %d', update_period)
+    logging.info('\t target_update_period: %d', target_update_period)
+    logging.info('\t epsilon_train: %f', epsilon_train)
+    logging.info('\t epsilon_eval: %f', epsilon_eval)
+    logging.info('\t epsilon_decay_period: %d', epsilon_decay_period)
+    logging.info('\t tf_device: %s', tf_device)
+    logging.info('\t use_staging: %s', use_staging)
+    logging.info('\t optimizer: %s', optimizer)
+    logging.info('\t max_tf_checkpoints_to_keep: %d',
+                 max_tf_checkpoints_to_keep)
+
+    self.num_actions = num_actions
+    self.observation_shape = tuple(observation_shape)
+    self.observation_dtype = observation_dtype
+    self.stack_size = stack_size
+    self.network = network
+    self.gamma = gamma
+    self.update_horizon = update_horizon
+    self.cumulative_gamma = math.pow(gamma, update_horizon)
+    self.min_replay_history = min_replay_history
+    self.target_update_period = target_update_period
+    self.epsilon_fn = epsilon_fn
+    self.epsilon_train = epsilon_train
+    self.epsilon_eval = epsilon_eval
+    self.epsilon_decay_period = epsilon_decay_period
+    self.update_period = update_period
+    self.eval_mode = eval_mode
+    self.training_steps = 0
+    self.optimizer = optimizer
+    tf.compat.v1.disable_v2_behavior()
+
+    if isinstance(summary_writer, str):  # If we're passing in directory name.
+      self.summary_writer = tf.compat.v1.summary.FileWriter(summary_writer)
+    else:
+      self.summary_writer = summary_writer
+    self.summary_writing_frequency = summary_writing_frequency
+    self.allow_partial_reload = allow_partial_reload
+
+    if sess is None:
+      config = tf.compat.v1.ConfigProto(allow_soft_placement=True)
+      # Allocate only subset of the GPU memory as needed which allows for
+      # running multiple agents/workers on the same GPU.
+      config.gpu_options.allow_growth = True
+      self._sess = tf.compat.v1.Session('', config=config)
+    else:
+      self._sess = sess
+
+    with tf.device(tf_device):
+      # Create a placeholder for the state input to the DQN network.
+      # The last axis indicates the number of consecutive frames stacked.
+      state_shape = (1,) + self.observation_shape + (stack_size,)
+      self.state = np.zeros(state_shape)
+      self.state_ph = tf.compat.v1.placeholder(
+          self.observation_dtype, state_shape, name='state_ph')
+      self._replay = self._build_replay_buffer(use_staging)   # *********** from this save 
+      self._replay.save(checkpoint_dir, iteration_number)  # iteration_number also goes suffix
+      """Save the underlying replay buffer's contents in a file.
+
+    Args:
+      checkpoint_dir: str, the directory where to read the numpy checkpointed
+        files from.
+      iteration_number: int, the iteration_number to use as a suffix in naming
+        numpy checkpoint files.
+    """
+

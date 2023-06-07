@@ -560,3 +560,12 @@ class DQNAgent(object):
                         os.path.join(checkpoint_dir,
                                      'tf_ckpt-{}'.format(iteration_number)))
     return True
+  
+  # To get self._replay  out of Class DQNAgent
+  def get_replay():
+    return self._replay
+  
+  # 大概率用不上但是还是记一下怎样类外修改
+  def set_replay():
+    self._replay = []
+    return self._replay

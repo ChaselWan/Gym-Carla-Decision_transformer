@@ -562,10 +562,10 @@ class DQNAgent(object):
     return True
   
   # To get self._replay  out of Class DQNAgent
-  def get_replay():
+  def get_replay(self):
     return self._replay
   
   # 大概率用不上但是还是记一下怎样类外修改
-  def set_replay():
+  def set_replay(self):
     self._replay = []
     return self._replay

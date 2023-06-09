@@ -5,22 +5,22 @@ ReplayElement = (
 
 STORE_FILENAME_PREFIX = '$store$_'
 
-class Replay_Buffer(observation_shape=(256,256)
-              stack_size=4,
-              replay_capacity=1000,
-              batch_size=32,
-              update_horizon=1,
-              gamma=0.99,
-              max_sample_attempts=1000,
-              extra_storage_types=None,
-              observation_dtype=np.uint8,  # whether revise
-              terminal_dtype=np.uint8,
-              action_shape=9, 
-              action_dtype=np.int32,
-              reward_shape=(),   # Empty tuple means the action is a scalar.
-              reward_dtype=np.float32,
-              checkpoint_duration=4,
-              keep_every=None):
+class Replay_Buffer(observation_shape
+              stack_size,
+              replay_capacity,
+              batch_size,
+              update_horizon,
+              gamma,
+              max_sample_attempts,
+              extra_storage_typese,
+              observation_dtype,  # whether revise
+              terminal_dtype,
+              action_shape, 
+              action_dtype,
+              reward_shape,   # Empty tuple means the action is a scalar.
+              reward_dtype,
+              checkpoint_duration,
+              keep_every):
   """ A simple out-of-graph Replay Buffer.
   Paraphrased from Dopamine.OutOfGraphReplayBuffer.
   

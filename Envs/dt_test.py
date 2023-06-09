@@ -11,101 +11,8 @@ import gym
 import gym_carla
 import carla
 
-# ============= Dt Atari ================
-import csv
-import logging
-# make deterministic
-from mingpt.utils import set_seed
-import numpy as np
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
-import math
-from torch.utils.data import Dataset
-from mingpt.model_atari import GPT, GPTConfig
-from mingpt.trainer_atari import Trainer, TrainerConfig
-from mingpt.utils import sample
-from collections import deque
-import random
-import torch
-import pickle
-import blosc
-import argparse
-from create_dataset import create_dataset
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--seed', type=int, default=123)
-parser.add_argument('--context_length', type=int, default=30)
-parser.add_argument('--epochs', type=int, default=5)
-parser.add_argument('--model_type', type=str, default='reward_conditioned')
-parser.add_argument('--num_steps', type=int, default=500000)
-parser.add_argument('--num_buffers', type=int, default=50)
-parser.add_argument('--game', type=str, default='Breakout')
-parser.add_argument('--batch_size', type=int, default=128)
-# 
-parser.add_argument('--trajectories_per_buffer', type=int, default=10, help='Number of trajectories to sample from each of the buffers.')
-parser.add_argument('--data_dir_prefix', type=str, default='./dqn_replay/')
-args = parser.parse_args()
-
-set_seed(args.seed)
-
-obss, actions, returns, done_idxs, rtgs, timesteps = create_dataset(args.num_buffers, args.num_steps, args.game, args.data_dir_prefix, args.trajectories_per_buffer)
-
-# set up logging
-logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
-)
-
-train_dataset = StateActionReturnDataset(obss, args.context_length*3, actions, done_idxs, rtgs, timesteps)
-
-mconf = GPTConfig(train_dataset.vocab_size, train_dataset.block_size,
-                  n_layer=6, n_head=8, n_embd=128, model_type=args.model_type, max_timestep=max(timesteps))
-model = GPT(mconf)
-
-# initialize a trainer instance and kick off training
-epochs = args.epochs
-tconf = TrainerConfig(max_epochs=epochs, batch_size=args.batch_size, learning_rate=6e-4,
-                      lr_decay=True, warmup_tokens=512*20, final_tokens=2*len(train_dataset)*args.context_length*3,
-                      num_workers=4, seed=args.seed, model_type=args.model_type, game=args.game, max_timestep=max(timesteps))
-trainer = Trainer(model, train_dataset, None, tconf)
-
-trainer.train()
-
-
-class StateActionReturnDataset(Dataset):
-  
-    def __init__(self, data, block_size, actions, done_idxs, rtgs, timesteps):
-        self.block_size = block_size
-        self.vocab_size = max(actions) + 1
-        self.data = data
-        self.actions = actions
-        self.done_idxs = done_idxs
-        self.rtgs = rtgs
-        self.timesteps = timesteps
-    
-    def __len__(self):
-        return len(self.data) - self.block_size
-      
-    def __getitem__(self, idx):
-        block_size = self.block_size // 3
-        done_idx = idx + block_size
-        for i in self.done_idxs:
-            if i > idx: # first done_idx greater than idx
-                done_idx = min(int(i), done_idx)
-                break
-        idx = done_idx - block_size
-        # 感觉只要改一个states和actions的shape
-        states = torch.tensor(np.array(self.data[idx:done_idx]), dtype=torch.float32).reshape(block_size, -1) # (block_size, 4*84*84)
-        states = states / 255.
-        actions = torch.tensor(self.actions[idx:done_idx], dtype=torch.long).unsqueeze(1) # (block_size, 1)
-        rtgs = torch.tensor(self.rtgs[idx:done_idx], dtype=torch.float32).unsqueeze(1)
-        timesteps = torch.tensor(self.timesteps[idx:idx+1], dtype=torch.int64).unsqueeze(1)
-
-        return states, actions, rtgs, timesteps
-
-
+# softly make a memory_buffer with randomly step
+from replay_memory.circular_replay_buffer import WrappedReplayBuffer()
 
 
 def main():
@@ -116,7 +23,7 @@ def main():
     'display_size': 256,  # screen size of bird-eye render
     'max_past_step': 1,  # the number of past steps to draw
     'dt': 0.1,  # time interval between two frames
-    'discrete': False,  # whether to use discrete control space
+    'discrete': True,  # whether to use discrete control space
     'discrete_acc': [-3.0, 0.0, 3.0],  # discrete value of accelerations
     'discrete_steer': [-0.2, 0.0, 0.2],  # discrete value of steering angles
     'continuous_accel_range': [-3.0, 3.0],  # continuous acceleration range
@@ -124,7 +31,7 @@ def main():
     'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
     'port': 2000,  # connection port
     'town': 'Town03',  # which town to simulate
-    'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
+    'task_mode': 'roudabout',  # mode of the task, [random, roundabout (only for Town03)]
     'max_time_episode': 1000,  # maximum timesteps per episode
     'max_waypt': 12,  # maximum number of waypoints
     'obs_range': 32,  # observation range (meter)
@@ -140,15 +47,59 @@ def main():
 
   # Set gym-carla environment
   env = gym.make('carla-v0', params=params)
-  obs = env.reset()
+  buffer = WrappedReplayBuffer(self,
+               observation_shape=(256,256),  # tuple uses () while list uses []
+               stack_size=4,
+               use_staging=False,
+               replay_capacity=1000000,
+               batch_size=32,
+               update_horizon=1,
+               gamma=0.99,
+               wrapped_memory=None,
+               max_sample_attempts=1000,
+               extra_storage_types=None,
+               observation_dtype=np.uint8,
+               terminal_dtype=np.uint8,
+               action_shape=(),
+               action_dtype=np.int32,
+               reward_shape=(),
+               reward_dtype=np.float32)  
+""" Args:
+      observation_shape: tuple of ints.
+      stack_size: int, number of frames to use in state stack.
+      use_staging: bool, when True it would use a staging area to prefetch
+        the next sampling batch.
+      replay_capacity: int, number of transitions to keep in memory.
+      batch_size: int.
+      update_horizon: int, length of update ('n' in n-step update).
+      gamma: int, the discount factor.
+      wrapped_memory: The 'inner' memory data structure. If None,
+        it creates the standard DQN replay memory.
+      max_sample_attempts: int, the maximum number of attempts allowed to
+        get a sample.
+      extra_storage_types: list of ReplayElements defining the type of the extra
+        contents that will be stored and returned by sample_transition_batch.
+      observation_dtype: np.dtype, type of the observations. Defaults to
+        np.uint8 for Atari 2600.
+      terminal_dtype: np.dtype, type of the terminals. Defaults to np.uint8 for
+        Atari 2600.
+      action_shape: tuple of ints, the shape for the action vector. Empty tuple
+        means the action is a scalar.
+      action_dtype: np.dtype, type of elements in the action.
+      reward_shape: tuple of ints, the shape of the reward vector. Empty tuple
+        means the reward is a scalar.
+      reward_dtype: np.dtype, type of elements in the reward.
+"""        
 
-  while True:
-    action = [2.0, 0.0]
-    obs,r,done,info = env.step(action)
-
-    if done:
-      obs = env.reset()
-
+  for episode in range(1,11): # a trajectory in trajectories
+    obs = env.reset()
+    terminal = False
+    while not terminal:
+        action = random.randint(0,8)
+        obs, r, terminal, info = env.step(action)
+        buffer.add(obs, action, r, terminal)
+        if terminal:
+          break               
 
 if __name__ == '__main__':
   main()

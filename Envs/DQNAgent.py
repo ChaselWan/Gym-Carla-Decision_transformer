@@ -5,21 +5,7 @@ ReplayElement = (
 
 STORE_FILENAME_PREFIX = '$store$_'
 
-class Replay_Buffer(object):
-  """ A simple out-of-graph Replay Buffer.
-  Paraphrased from Dopamine.OutOfGraphReplayBuffer.
-  
-  Updates:
-    skipped logging.info
-    skipped process of learn
-  
-  Function:
-    add:add transition into self._store
-    save:save self._store into a file
-    load:load file of self._store
-  """
-  def __init__(self,
-              observation_shape=(256,256)
+class Replay_Buffer(observation_shape=(256,256)
               stack_size=4,
               replay_capacity=1000,
               batch_size=32,
@@ -35,6 +21,20 @@ class Replay_Buffer(object):
               reward_dtype=np.float32,
               checkpoint_duration=4,
               keep_every=None):
+  """ A simple out-of-graph Replay Buffer.
+  Paraphrased from Dopamine.OutOfGraphReplayBuffer.
+  
+  Updates:
+    skipped logging.info
+    skipped process of learn
+  
+  Function:
+    add:add transition into self._store
+    save:save self._store into a file
+    load:load file of self._store
+  """
+  def __init__(self):
+    
     assert isinstance(observation_shape, tuple)  # for debug
     if replay_capacity < update_horizon + stack_size:
       raise ValueError('There is not enough capacity to cover '

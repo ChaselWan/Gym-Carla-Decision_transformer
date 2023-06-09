@@ -53,7 +53,7 @@ class FixedReplayBuffer(object):
       # pytype: disable=attribute-error
       replay_buffer = circular_replay_buffer.OutOfGraphReplayBuffer(
           *self._args, **self._kwargs)
-      replay_buffer.load(self._data_dir, suffix) # better have a memory in data_dir first
+      replay_buffer.load(self._data_dir, suffix)
       tf.logging.info('Loaded replay buffer ckpt {} from {}'.format(
           suffix, self._data_dir))
       # pytype: enable=attribute-error

@@ -160,6 +160,65 @@ class Replay_Buffer(object):
           else:
             pickle.dump(self.__dict__[attr], outfile)
     
+    def _return_checkpointable_elements(self):
+    """Return the dict of elements of the class for checkpointing.
+
+    Returns:
+      checkpointable_elements: dict containing all non private (starting with
+      _) members + all the arrays inside self._store.
+    """
+    checkpointable_elements = {}
+    for member_name, member in self.__dict__.items():
+      if member_name == '_store':
+        for array_name, array in self._store.items():
+          checkpointable_elements[STORE_FILENAME_PREFIX + array_name] = array
+      elif not member_name.startswith('_'):
+        checkpointable_elements[member_name] = member
+    return checkpointable_elements
+  
+def load(self, checkpoint_dir, suffix):
+    """Restores the object from bundle_dictionary and numpy checkpoints.
+
+    Args:
+      checkpoint_dir: str, the directory where to read the numpy checkpointed
+        files from.
+      suffix: str, the suffix to use in numpy checkpoint files.
+
+    Raises:
+      NotFoundError: If not all expected files are found in directory.
+    """
+    save_elements = self._return_checkpointable_elements()
+    skip_episode_end_indices = False
+    # We will first make sure we have all the necessary files available to avoid
+    # loading a partially-specified (i.e. corrupted) replay buffer.
+    for attr in save_elements:
+      filename = self._generate_filename(checkpoint_dir, attr, suffix)
+
+      if not tf.io.gfile.exists(filename):
+        if attr == 'episode_end_indices':
+          logging.warning('Unable to find episode_end_indices. This is '
+                          'expected for old checkpoints.')
+          skip_episode_end_indices = True
+          continue
+
+        raise tf.errors.NotFoundError(None, None,
+                                      'Missing file: {}'.format(filename))
+    # If we've reached this point then we have verified that all expected files
+    # are available.
+    for attr in save_elements:
+      if attr == 'episode_end_indices' and skip_episode_end_indices:
+        continue
+
+      filename = self._generate_filename(checkpoint_dir, attr, suffix)
+      with tf.io.gfile.GFile(filename, 'rb') as f:
+        with gzip.GzipFile(fileobj=f) as infile:
+          if attr.startswith(STORE_FILENAME_PREFIX):
+            array_name = attr[len(STORE_FILENAME_PREFIX):]
+            self._store[array_name] = np.load(infile, allow_pickle=False)
+          elif isinstance(self.__dict__[attr], np.ndarray):
+            self.__dict__[attr] = np.load(infile, allow_pickle=False)
+          else:
+            self.__dict__[attr] = pickle.load(infile)  
       
     
     

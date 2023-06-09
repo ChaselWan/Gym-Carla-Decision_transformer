@@ -47,8 +47,7 @@ def main():
 
   # Set gym-carla environment
   env = gym.make('carla-v0', params=params)
-  buffer = WrappedReplayBuffer(self,
-               observation_shape=(256,256),  # tuple uses () while list uses []
+  buffer = WrappedReplayBuffer(observation_shape=(256,256),  # tuple uses () while list uses []
                stack_size=4,
                use_staging=False,
                replay_capacity=1000000,
@@ -60,7 +59,7 @@ def main():
                extra_storage_types=None,
                observation_dtype=np.uint8,
                terminal_dtype=np.uint8,
-               action_shape=(),
+               action_shape=8,
                action_dtype=np.int32,
                reward_shape=(),
                reward_dtype=np.float32)  

@@ -12,7 +12,7 @@ import gym_carla
 import carla
 
 # softly make a memory_buffer with randomly step
-from replay_memory.circular_replay_buffer import WrappedReplayBuffer()
+from replay_memory.circular_replay_buffer import WrappedReplayBuffer
 
 
 def main():

@@ -94,11 +94,11 @@ class ReplayBuffer(object):
     self.replay_capacity = replay_capacity
     self.batch_size = batch_size  # for sample but unuseful temprorarily
     self.storage_elements = [
-        ReplayElement('observation', self._observation_shape,
-                      self._observation_dtype),
-        ReplayElement('action', self._action_shape, self._action_dtype),
-        ReplayElement('reward', self._reward_shape, self._reward_dtype),
-        ReplayElement('terminal', (), self._terminal_dtype)
+        ReplayElement('observation', self.observation_shape,
+                      self.observation_dtype),
+        ReplayElement('action', self.action_shape, self.action_dtype),
+        ReplayElement('reward', self.reward_shape, self.reward_dtype),
+        ReplayElement('terminal', (), self.terminal_dtype)
     ]
     """print(self.storage_elements:
     [shape_type(name='observation', shape=(256, 256), type=<class 'numpy.float32'>),

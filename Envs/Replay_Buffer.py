@@ -147,7 +147,7 @@ class ReplayBuffer(object):
       
     if terminal:
       self.episode_end_indices.add(self.cursor())
-      self.+next_experience_is_episode_start = True
+      self._next_experience_is_episode_start = True
     else:
       self.episode_end_indices.discard(self.cursor())
     

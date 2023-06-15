@@ -108,7 +108,7 @@ class ReplayBuffer(object):
     
     # create buffer store
     self.memory = self._create_storage()
-    self.add_acount = np.array(0)
+    self.add_count = np.array(0)
     # self.invalid_range 
     # self._cumulative_discount_vector: for sample and caculate ?
     self._next_experience_is_episode_start = True # initial before start
@@ -170,7 +170,7 @@ class ReplayBuffer(object):
 
   def cursor(self):
     """Index to the location where the next transition will be written."""
-    return self.add_count % self._replay_capacity
+    return self.add_count % self.replay_capacity
   
   def _add(self,transition):
     # Add Function Finally

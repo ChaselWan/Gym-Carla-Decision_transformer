@@ -203,7 +203,7 @@ class ReplayBuffer(object):
     if not tf.io.gfile.exists(checkpoint_dir):
       print(" The checkpoint_dir does not exist !")
       return
-    checkpointable_elements = self._return checkpointable_elements()
+    checkpointable_elements = self._return_checkpointable_elements()
     
     for attr in checkpoint_elements:
       filename = self._generate_filename(checkpoint_dir, attr, iteration_number)

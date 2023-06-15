@@ -89,6 +89,8 @@ class ReplayBuffer(object):
     self.action_dtype = action_dtype
     self.reward_shape = reward_shape
     self.reward_dtype = reward_dtype
+    self.terminal_dtype = terminal_dtype
+    self.stack_size = stack_size
     self.replay_capacity = replay_capacity
     self.batch_size = batch_size  # for sample but unuseful temprorarily
     self.storage_elements = [

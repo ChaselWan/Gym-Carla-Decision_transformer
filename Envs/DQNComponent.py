@@ -266,16 +266,3 @@ class ReplayBuffer(object):
         else:
           self.__dict__[attr] = pickle.load(infile)
   
-  
-class DQNAgent(object):
-  # An agent for inputing observations, outputing action and storing memory to buffer
-  
-  def __init__(self, 
-               num_actions, 
-               network=NatureDQNNetwork, ):
-    # initialize DQNagent and replay_buffer
-    self.num_actions = num_actions
-    self.network = network
-    self.buffer = 
-    
-  def get_action(self,)

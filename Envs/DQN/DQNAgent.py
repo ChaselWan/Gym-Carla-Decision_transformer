@@ -22,7 +22,6 @@ class DQNAgent(object):
                epsilon_decay_period, 
                update_period, 
                #eval_mode, 
-               training_steps, 
                optimizer):
     # initialize DQNagent and replay_buffer
     self.num_actions = num_actions

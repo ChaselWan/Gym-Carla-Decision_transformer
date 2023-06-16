@@ -51,8 +51,9 @@ class DQNAgent(object):
       self.state = np.zeros(state_shape)
       self.state_ph = tf.compat.v1.placeholder(
           self.observation_dtype, state_shape, name='state_ph')
-      self._replay = self._build_replay_buffer(use_staging)
-      
+      # self._replay = self._build_replay_buffer(use_staging)
+      # could be defined in main
+     
       self._build_networks()
       
       self._train_op = self._build_train_op()
@@ -61,18 +62,10 @@ class DQNAgent(object):
   def _create_network(self, name):
     network = self.network(self.num_actions, name=name)
     return network
+  
   def _build_replay_buffer(self):
-    return ReplayBuffer(observation_shape=self.observation_shape, 
-                        observation_dtype=self.observation_dtype,
-                        action_shape=self.action_shape, 
-                        action_dtype=self.action_dtype, 
-                        reward_shape=self.reward_shape, 
-                        reward_dtype=self.reward_dtype, 
-                        terminal_dtype=self.terminal_dtype,              
-                        stack_size=self.stack_size, 
-                        replay_capacity=100000, 
-                        batch_size=self.batch_size, 
-                        update_horizon=1)
+    # should be defined in main
+    pass
   
   def _build_networks(self):
     """Builds the Q-value network computations needed for acting and training.
@@ -118,7 +111,8 @@ class DQNAgent(object):
       1. - tf.cast(self._replay.terminals, tf.float32))
   
   def step(self, reward, observation):
-    
+    # Have been defined in class Env
+    pass
   
   def choose_action(self, observation):
     """Returns: int, the selected action
@@ -127,4 +121,51 @@ class DQNAgent(object):
       # Choose a random action with probability epsilon.
       return random.randint(0, self.num_actions - 1)
     else:
-      return self._sess.run(
+      return self._sess.run(self._q_argmax, {self.state_ph: self.state})
+    # run(fetch, feed.dict)
+    """sees like as follows：
+    self._net_outputs = self.online_convnet(self.state_
+    self._q_argmax = tf.argmax(self._net_outputs.q_values, axis=1)[0]
+    """
+    
+   def _train_step(self):
+    """Runs a single training step.
+
+    Runs a training op if both:
+      (1) A minimum number of frames have been added to the replay buffer.
+      (2) `training_steps` is a multiple of `update_period`.
+
+    Also, syncs weights from online to target network if training steps is a
+    multiple of target update period.
+    """
+    # Run a train op at the rate of self.update_period if enough training steps
+    # have been run. This matches the Nature DQN behaviour.
+    if self._replay.memory.add_count > self.min_replay_history:
+      if self.training_steps % self.update_period == 0:
+        self._sess.run(self._train_op)
+        if (self.summary_writer is not None and
+            self.training_steps > 0 and
+            self.training_steps % self.summary_writing_frequency == 0):
+          summary = self._sess.run(self._merged_summaries)
+          self.summary_writer.add_summary(summary, self.training_steps)
+
+      if self.training_steps % self.target_update_period == 0:
+        self._sess.run(self._sync_qt_ops)
+
+    self.training_steps += 1
+ 
+def _record_observation(self, observation):
+  # shoud be directly written in main
+  pass
+
+def _store_transition(self, last_observation, action, reward, is_terminal):
+  # should be difined in class replay buffer
+  pass
+
+def _reset_state(self):
+  """Resets the agent state by filling it with zeros."""
+  self.state.fill(0)
+
+def bundle_and_checkpoint(self, checkpoint_dir, iteration_number):
+  pass
+

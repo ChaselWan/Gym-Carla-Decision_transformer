@@ -154,18 +154,19 @@ class DQNAgent(object):
 
     self.training_steps += 1
  
-def _record_observation(self, observation):
-  # shoud be directly written in main
-  pass
+  def _record_observation(self, observation):
+    # shoud be directly written in main
+    pass
 
-def _store_transition(self, last_observation, action, reward, is_terminal):
+  def _store_transition(self, last_observation, action, reward, is_terminal):
   # should be difined in class replay buffer
-  pass
+    pass
 
-def _reset_state(self):
-  """Resets the agent state by filling it with zeros."""
-  self.state.fill(0)
+  def _reset_state(self):
+    """Resets the agent state by filling it with zeros."""
+    self.state.fill(0)
 
-def bundle_and_checkpoint(self, checkpoint_dir, iteration_number):
-  pass
+  def bundle_and_checkpoint(self, checkpoint_dir, iteration_number):
+    pass
 
+  

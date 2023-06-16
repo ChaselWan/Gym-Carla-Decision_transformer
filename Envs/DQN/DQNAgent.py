@@ -1,5 +1,6 @@
 from DQNComponent import ReplayBuffer,NatureDQNNetwork
 
+tf_device = '/cpu:*'
 
 
 class DQNAgent(object):
@@ -21,6 +22,7 @@ class DQNAgent(object):
                epsilon_eval, 
                epsilon_decay_period, 
                update_period, 
+               tf_device, 
                #eval_mode, 
                optimizer):
     # initialize DQNagent and replay_buffer

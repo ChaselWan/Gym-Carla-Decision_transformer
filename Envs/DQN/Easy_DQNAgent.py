@@ -26,7 +26,6 @@ import gym
 import gym_carla
 import carla
 
-from replay_buffer import ReplayBuffer
 
 
 # global variables

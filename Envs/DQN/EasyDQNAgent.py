@@ -1,93 +1,268 @@
-# easy implement
+import pygame
+import abc
+import glob
+import os
+import sys
+from types import LambdaType
+from collections import deque, namedtuple
 
-import torch                                    # 导入torch
-import torch.nn as nn                           # 导入torch.nn
-import torch.nn.functional as F                 # 导入torch.nn.functional
-import numpy as np                              # 导入numpy
-import gym                                      # 导入gym
+import random 
+import time
+import numpy as np
+import math
 
-# 超参数
-BATCH_SIZE = 32                                 # 样本数量
-LR = 0.01                                       # 学习率
-EPSILON = 0.9                                   # greedy policy
-GAMMA = 0.9                                     # reward discount
-TARGET_REPLACE_ITER = 100                       # 目标网络更新频率
-MEMORY_CAPACITY = 2000                          # 记忆库容量
-env = gym.make('CartPole-v0').unwrapped         # 使用gym库中的环境：CartPole，且打开封装(若想了解该环境，请自行百度)
-N_ACTIONS = env.action_space.n                  # 杆子动作个数 (2个)
-N_STATES = env.observation_space.shape[0]       # 杆子状态个数 (4个)
+import torch
+import torch.nn as nn
+from torch.autograd import Variable
+import torch.nn.functional as F
+ 
+import torch.optim as optim
+ 
+import torchvision.transforms as T
+from torch import FloatTensor, LongTensor, ByteTensor
+Tensor = FloatTensor
 
-# 定义Net类 (定义网络)
+import gym
+import gym_carla
+import carla
+
+from replay_buffer import ReplayBuffer
+
+
+# global variables
+IM_WIDTH = 80
+IM_HEIGHT = 60
+SHOW_PREVIEW = False
+ 
+SECOND_PER_EPISODE = 10
+
+EPSILON = 0.9       # epsilon used for epsilon greedy approach
+GAMMA = 0.9
+TARGET_NETWORK_REPLACE_FREQ = 100       # How frequently target netowrk updates
+MEMORY_CAPACITY = 100
+BATCH_SIZE = 32
+LR = 0.01           # learning rate
+MODEL_NAME = "nnModule"
+
+def select_action(action_number):
+    if action_number == 0:
+        real_action = [1, -0.2]
+    elif action_number == 1:
+        real_action = [1, 0]
+    elif action_number == 2:
+        real_action = [1, 0.2]
+    elif action_number == 3:
+        real_action = [2, -0.2]
+    elif action_number == 4:
+        real_action = [2, 0]
+    elif action_number == 5:
+        real_action = [2, 0.2]
+    elif action_number == 6:
+        real_action = [3.0, -0.2]
+    elif action_number == 7:
+        real_action = [3.0, 0]
+    elif action_number == 8:
+        real_action = [3.0, 0.2]
+    return real_action
+
 class Net(nn.Module):
-    def __init__(self):                                                         # 定义Net的一系列属性
-        # nn.Module的子类函数必须在构造函数中执行父类的构造函数
-        super(Net, self).__init__()                                             # 等价与nn.Module.__init__()
+    def __init__(self):
+        super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.conv3 = nn.Conv2d(32, 32, kernel_size=5, stride=2)
+        self.bn3 = nn.BatchNorm2d(32)
+        self.head = nn.Linear(26912,5)  #self.head = nn.Linear(896,5)
+    def forward(self, x):
+        x = F.relu(self.bn1(self.conv1(x)))  # 一层卷积
+        x = F.relu(self.bn2(self.conv2(x)))  # 两层卷积
+        x = F.relu(self.bn3(self.conv3(x)))  # 三层卷积
+        return self.head(x.view(x.size(0),-1)) # 全连接层 
 
-        self.fc1 = nn.Linear(N_STATES, 50)                                      # 设置第一个全连接层(输入层到隐藏层): 状态数个神经元到50个神经元
-        self.fc1.weight.data.normal_(0, 0.1)                                    # 权重初始化 (均值为0，方差为0.1的正态分布)
-        self.out = nn.Linear(50, N_ACTIONS)                                     # 设置第二个全连接层(隐藏层到输出层): 50个神经元到动作数个神经元
-        self.out.weight.data.normal_(0, 0.1)                                    # 权重初始化 (均值为0，方差为0.1的正态分布)
 
-    def forward(self, x):                                                       # 定义forward函数 (x为状态)
-        x = F.relu(self.fc1(x))                                                 # 连接输入层到隐藏层，且使用激励函数ReLU来处理经过隐藏层后的值
-        actions_value = self.out(x)                                             # 连接隐藏层到输出层，获得最终的输出值 (即动作值)
-        return actions_value                                                    # 返回动作值
-
-
-# 定义DQN类 (定义两个网络)
 class DQN(object):
-    def __init__(self):                                                         # 定义DQN的一系列属性
-        self.eval_net, self.target_net = Net(), Net()                           # 利用Net创建两个神经网络: 评估网络和目标网络
-        self.learn_step_counter = 0                                             # for target updating
-        self.memory_counter = 0                                                 # for storing memory
-        self.memory = np.zeros((MEMORY_CAPACITY, N_STATES * 2 + 2))             # 初始化记忆库，一行代表一个transition
-        self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=LR)    # 使用Adam优化器 (输入为评估网络的参数和学习率)
-        self.loss_func = nn.MSELoss()                                           # 使用均方损失函数 (loss(xi, yi)=(xi-yi)^2)
+    def __init__(self):
+        self.eval_net,self.target_net = Net(),Net()
+        # define counter, memory size and loss function
+        self.learn_step_counter = 0 # count the steps of learning process
+        self.memory = []
+        self.position = 0 # counter used for experience replay buff        
+        self.capacity = 200
+        
+        #------- Define the optimizer------#
+        self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=LR)
+        
+        # ------Define the loss function-----#
+        self.loss_func = nn.MSELoss()
 
-    def choose_action(self, x):                                                 # 定义动作选择函数 (x为状态)
-        x = torch.unsqueeze(torch.FloatTensor(x), 0)                            # 将x转换成32-bit floating point形式，并在dim=0增加维数为1的维度
-        if np.random.uniform() < EPSILON:                                       # 生成一个在[0, 1)内的随机数，如果小于EPSILON，选择最优动作
-            actions_value = self.eval_net.forward(x)                            # 通过对评估网络输入状态x，前向传播获得动作值
-            action = torch.max(actions_value, 1)[1].data.numpy()                # 输出每一行最大值的索引，并转化为numpy ndarray形式
-            action = action[0]                                                  # 输出action的第一个数
-        else:                                                                   # 随机选择动作
-            action = np.random.randint(0, N_ACTIONS)                            # 这里action随机等于0或1 (N_ACTIONS = 2)
-        return action                                                           # 返回选择的动作 (0或1)
 
-    def store_transition(self, s, a, r, s_):                                    # 定义记忆存储函数 (这里输入为一个transition)
-        transition = np.hstack((s, [a, r], s_))                                 # 在水平方向上拼接数组
-        # 如果记忆库满了，便覆盖旧的数据
-        index = self.memory_counter % MEMORY_CAPACITY                           # 获取transition要置入的行数
-        self.memory[index, :] = transition                                      # 置入transition
-        self.memory_counter += 1                                                # memory_counter自加1
 
-    def learn(self):                                                            # 定义学习函数(记忆库已满后便开始学习)
-        # 目标网络参数更新
-        if self.learn_step_counter % TARGET_REPLACE_ITER == 0:                  # 一开始触发，然后每100步触发
-            self.target_net.load_state_dict(self.eval_net.state_dict())         # 将评估网络的参数赋给目标网络
-        self.learn_step_counter += 1                                            # 学习步数自加1
-
-        # 抽取记忆库中的批数据
-        sample_index = np.random.choice(MEMORY_CAPACITY, BATCH_SIZE)            # 在[0, 2000)内随机抽取32个数，可能会重复
-        b_memory = self.memory[sample_index, :]                                 # 抽取32个索引对应的32个transition，存入b_memory
-        b_s = torch.FloatTensor(b_memory[:, :N_STATES])
-        # 将32个s抽出，转为32-bit floating point形式，并存储到b_s中，b_s为32行4列
-        b_a = torch.LongTensor(b_memory[:, N_STATES:N_STATES+1].astype(int))
-        # 将32个a抽出，转为64-bit integer (signed)形式，并存储到b_a中 (之所以为LongTensor类型，是为了方便后面torch.gather的使用)，b_a为32行1列
-        b_r = torch.FloatTensor(b_memory[:, N_STATES+1:N_STATES+2])
-        # 将32个r抽出，转为32-bit floating point形式，并存储到b_s中，b_r为32行1列
-        b_s_ = torch.FloatTensor(b_memory[:, -N_STATES:])
-        # 将32个s_抽出，转为32-bit floating point形式，并存储到b_s中，b_s_为32行4列
-
-        # 获取32个transition的评估值和目标值，并利用损失函数和优化器进行评估网络参数更新
-        q_eval = self.eval_net(b_s).gather(1, b_a)
-        # eval_net(b_s)通过评估网络输出32行每个b_s对应的一系列动作值，然后.gather(1, b_a)代表对每行对应索引b_a的Q值提取进行聚合
-        q_next = self.target_net(b_s_).detach()
-        # q_next不进行反向传递误差，所以detach；q_next表示通过目标网络输出32行每个b_s_对应的一系列动作值
-        q_target = b_r + GAMMA * q_next.max(1)[0].view(BATCH_SIZE, 1)
-        # q_next.max(1)[0]表示只返回每一行的最大值，不返回索引(长度为32的一维张量)；.view()表示把前面所得到的一维张量变成(BATCH_SIZE, 1)的形状；最终通过公式得到目标值
+    def choose_action(self, x):
+        # This function is used to make decision based upon epsilon greedy
+        
+        x = torch.unsqueeze(torch.FloatTensor(x), 0) # add 1 dimension to input state x
+        x = x.permute(0,3,2,1)  #把图片维度从[batch, height, width, channel] 转为[batch, channel, height, width]
+        # input only one sample
+        if np.random.uniform() < EPSILON:   # greedy
+            # use epsilon-greedy approach to take action
+            actions_value = self.eval_net.forward(x)
+            #print(torch.max(actions_value, 1)) 
+            # torch.max() returns a tensor composed of max value along the axis=dim and corresponding index
+            # what we need is the index in this function, representing the action of cart.
+            action = torch.max(actions_value, 1)[1].data.numpy()
+            action = action[0]
+            
+        else: 
+            action = np.random.randint(0, 5)
+        
+        return action
+ 
+    def push_memory(self, obs, a, r, obs_):
+        if len(self.memory) < self.capacity:
+            self.memory.append(None)
+        self.memory[self.position] = Transition(torch.unsqueeze(torch.FloatTensor(obs), 0),torch.unsqueeze(torch.FloatTensor(obs_), 0),\
+                                                torch.from_numpy(np.array([a])),torch.from_numpy(np.array([r],dtype='int64')))
+        self.position = (self.position + 1) % self.capacity
+	
+                
+    def get_sample(self,batch_size):
+        return random.sample(self.memory, batch_size)
+        
+    def learn(self):
+        # Define how the whole DQN works including sampling batch of experiences,
+        # when and how to update parameters of target network, and how to implement
+        # backward propagation.
+        
+        # update the target network every fixed steps
+        if self.learn_step_counter % TARGET_NETWORK_REPLACE_FREQ == 0:
+            # Assign the parameters of eval_net to target_net
+            self.target_net.load_state_dict(self.eval_net.state_dict())
+        self.learn_step_counter += 1
+        
+        transitions = self.get_sample(BATCH_SIZE)  # 抽样
+        print(transitions)
+        batch = Transition(*zip(*transitions))
+ 
+        # extract vectors or matrices s,a,r,s_ from batch memory and convert these to torch Variables
+        # that are convenient to back propagation
+        b_s = Variable(torch.cat(batch.state))
+        # convert long int type to tensor
+        b_a = Variable(torch.cat(batch.action))
+        b_r = Variable(torch.cat(batch.reward))
+        b_s_ = Variable(torch.cat(batch.next_state))
+        
+ 
+        #b_s和b_s_分别对应当前帧和下一帧的图像数据，变量的维度是80*60*3(x*y*rgb_channel)，但进入神经网络需将其维度变为3*80*60
+        b_s = b_s.permute(0,3,2,1)  
+        b_s_ = b_s_.permute(0,3,2,1)        
+        
+        # calculate the Q value of state-action pair
+        q_eval = self.eval_net(b_s).gather(1,b_a.unsqueeze(1)) # (batch_size, 1)
+ 
+        # calculate the q value of next state
+        q_next = self.target_net(b_s_).detach() # detach from computational graph, don't back propagate
+        # select the maximum q value
+        # q_next.max(1) returns the max value along the axis=1 and its corresponding index
+        print(q_next)
+        print(q_next.max(1))
+        q_target = b_r + GAMMA * q_next.max(1)[0].view(BATCH_SIZE, 1) # (batch_size, 1)
+        print(q_target)
+        
+        #q_target shape:32 x 32,looks like that q_next.max didn't make sense.
         loss = self.loss_func(q_eval, q_target)
-        # 输入32个评估值和32个目标值，使用均方损失函数
-        self.optimizer.zero_grad()                                      # 清空上一步的残余更新参数值
-        loss.backward()                                                 # 误差反向传播, 计算参数更新值
-        self.optimizer.step()                                           # 更新评估网络的所有参数
+        
+        self.optimizer.zero_grad() # reset the gradient to zero
+        loss.backward()
+        self.optimizer.step() # execute back propagation for one step
+        
+Transition = namedtuple('Transition',('state', 'next_state','action', 'reward'))
+
+
+def main():
+  # parameters for the gym_carla environment
+  params = {
+    'number_of_vehicles': 100,
+    'number_of_walkers': 0,
+    'display_size': 256,  # screen size of bird-eye render
+    'max_past_step': 1,  # the number of past steps to draw
+    'dt': 0.1,  # time interval between two frames
+    'discrete': False,  # whether to use discrete control space
+    'discrete_acc': [-3.0, 0.0, 3.0],  # discrete value of accelerations
+    'discrete_steer': [-0.2, 0.0, 0.2],  # discrete value of steering angles
+    'continuous_accel_range': [-3.0, 3.0],  # continuous acceleration range
+    'continuous_steer_range': [-0.3, 0.3],  # continuous steering angle range
+    'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
+    'port': 2000,  # connection port
+    'town': 'Town03',  # which town to simulate
+    'task_mode': 'roundabout',  # mode of the task, [random, roundabout (only for Town03)]
+    'max_time_episode': 1000,  # maximum timesteps per episode
+    'max_waypt': 12,  # maximum number of waypoints
+    'obs_range': 32,  # observation range (meter)
+    'lidar_bin': 0.125,  # bin size of lidar sensor (meter)
+    'd_behind': 12,  # distance behind the ego vehicle (meter)
+    'out_lane_thres': 2.0,  # threshold for out of lane
+    'desired_speed': 8,  # desired speed (m/s)
+    'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
+    'display_route': True,  # whether to render the desired route
+    'pixor_size': 64,  # size of the pixor labels
+    'pixor': False,  # whether to output PIXOR observation
+  }
+
+  # Set gym-carla environment
+  env = gym.make('carla-v0', params=params)
+  dqn = DQN()
+  buffer = ReplayBuffer(observation_shape=(256,256), 
+               observation_dtype=np.float32, 
+               action_shape=(), 
+               action_dtype=np.uint8,
+               reward_shape=(),
+               reward_dtype=np.float32,
+               terminal_dtype=(),
+               replay_capacity=1000,
+               stack_size=4)
+  dqn.eval_net.load_state_dict(torch.load('EvalNet.pt'))
+  dqn.eval_net.eval()
+  dqn.target_net.load_state_dict(torch.load('TargetNet.pt'))
+  dqn.target_net.eval()
+
+  # =============== push memory into buffer ================
+  count = 0
+  max_reward = float("-inf")
+  reward_list = []
+  for iteration in range(1,11):
+    print("# Iteration{} start!".format(iteration))
+    reward = 0
+    env.reset()
+    obs = env.reset()
+    for episode in range(100):      
+      a=dqn.choose_action(obs)
+      action = select_action(a)
+      print("# Episode{} start!".format(episode))
+      print("choose_action:", action)
+      obs_,r,done,info = env.step(action)
+      print(obs.shape[0])
+      dqn.push_memory(obs, a, r, obs_)
+      transition = buffer.make_transition(obs, a, r, done)
+      buffer.add(transition)
+      reward += r
+      obs=obs_
+
+      if  (dqn.position % (MEMORY_CAPACITY-1) )== 0: #or done:
+        dqn.learn()
+        count+=1
+        print('learned times:',count)
+
+      if done:
+        print("Done!")
+        break
+    print("# the reward of this iteration is", reward)
+    if reward > max_reward:
+      max_reward = reward
+      torch.save(dqn.eval_net.state_dict(),'EvalNet.pt')
+      torch.save(dqn.target_net.state_dict(),'TargetNet.pt')
+      buffer.save(Dopamin_DQN,1)
+
+if __name__ == '__main__':
+    main()

@@ -32,7 +32,8 @@ import carla
 
 
 # 目前的问题是将observation传进transition时提示shape不合适[一个是(256,256),一个是(256,256,3)]，想法是将bev拆成三个或四个通道输入（有四个部分染色），再将四张小图合并成一张。
-# 但是这样做的问题是无法skip，可以先进行尝试，之后再说。
+# already been soluted
+# 但是这样做的问题是无法skip，可以先进行尝试，之后再说。whitch the most vital question
 
 # Easy implement of replay_buffer and DQNNet
 

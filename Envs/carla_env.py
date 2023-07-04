@@ -669,11 +669,9 @@ class CarlaEnv(gym.Env):
           actor.destroy()
 
 
-
-
-  def _train_get_state(self, state):
+  def _train_get_state(self):
     # 把state从array变为torch并除以255
-    return torch.tensor(state, dtype=torch.float32, device=self.device).div_(255)
+    return torch.tensor(self._get_obs(), dtype=torch.float32, device=self.device).div_(255)
     
   def _train_reset_buffer(self):
     for _ in range(args.history_length):  # 每次加载history_length长度的buffer
@@ -704,18 +702,4 @@ class CarlaEnv(gym.Env):
 
   def eval(self):
     self.training = False
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

@@ -667,3 +667,55 @@ class CarlaEnv(gym.Env):
           if actor.type_id == 'controller.ai.walker':
             actor.stop()
           actor.destroy()
+
+
+
+
+  def _train_get_state(self, state):
+    # 把state从array变为torch并除以255
+    return torch.tensor(state, dtype=torch.float32, device=self.device).div_(255)
+    
+  def _train_reset_buffer(self):
+    for _ in range(args.history_length):  # 每次加载history_length长度的buffer
+      self.state_buffer.append(torch.zeros(256,256,3, device=self.device))
+
+  def train_step(self, action):
+    # Repeat action 4 times, max pool over last 2 frames
+    frame_buffer = torch.zeros(2,256,256,3, device=self.device)
+    reward, done = 0, False
+    for t in range(4):
+      s, r, done, _ = self.step(action)
+      reward += r
+      if t == 2:
+        frame_buffer[0] = state  # 只在t=2和3的时候采样observation
+      elif t == 3:
+        frame_buffer[1] == state
+      if done:
+        break
+    observation = frame_buffer.max(0)[0]   # ?
+    self.state_buffer.append(observation) # torch[(256,256,3)]
+    # Detect loss of life as terminal in training mode
+    if self.training:
+      return torch.stack(list(self.state_buffer), 0), reward, done
+
+  def train(self):
+    self.training = True
+
+
+  def eval(self):
+    self.training = False
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
